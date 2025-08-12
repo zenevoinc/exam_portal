@@ -35,49 +35,113 @@ function readRowsFromUpload(array $file): array {
     $tmp = $file['tmp_name'];
     $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
     $rows = [];
-    if ($ext === 'csv') {
-        if (($h = fopen($tmp, 'r')) !== false) {
-            while (($data = fgetcsv($h)) !== false) { $rows[] = $data; }
-            fclose($h);
+    
+    if ($ext !== 'csv') {
+        throw new Exception('Only CSV files are supported. Please convert your Excel file to CSV format.');
+    }
+    
+    if (($h = fopen($tmp, 'r')) !== false) {
+        $rowCount = 0;
+        while (($data = fgetcsv($h)) !== false) {
+            $rowCount++;
+            // Skip empty rows
+            if (count(array_filter($data, function($v) { return trim($v) !== ''; })) > 0) {
+                $rows[] = $data;
+            }
+        }
+        fclose($h);
+        
+        if ($rowCount === 0) {
+            throw new Exception('The CSV file appears to be empty.');
         }
     } else {
-        $autoload = __DIR__ . '/../vendor/autoload.php';
-        if (file_exists($autoload)) {
-            require_once $autoload;
-            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($tmp);
-            $sheet = $reader->load($tmp)->getActiveSheet();
-            $rows = $sheet->toArray();
-        }
+        throw new Exception('Failed to read the uploaded CSV file. Please check the file format.');
     }
+    
     return $rows;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!isset($_FILES['students_file']) || $_FILES['students_file']['error'] !== UPLOAD_ERR_OK) {
-        $error = 'Please upload a valid CSV/XLSX file.';
+        $uploadErrors = [
+            UPLOAD_ERR_INI_SIZE => 'File is too large (exceeds server limit)',
+            UPLOAD_ERR_FORM_SIZE => 'File is too large (exceeds form limit)',
+            UPLOAD_ERR_PARTIAL => 'File was only partially uploaded',
+            UPLOAD_ERR_NO_FILE => 'No file was uploaded',
+            UPLOAD_ERR_NO_TMP_DIR => 'Server error: No temporary directory',
+            UPLOAD_ERR_CANT_WRITE => 'Server error: Cannot write file',
+            UPLOAD_ERR_EXTENSION => 'Server error: File upload stopped by extension'
+        ];
+        $errorCode = $_FILES['students_file']['error'] ?? UPLOAD_ERR_NO_FILE;
+        $error = $uploadErrors[$errorCode] ?? 'Unknown upload error occurred';
     } else {
-        $rows = readRowsFromUpload($_FILES['students_file']);
-        if (!$rows) { $error = 'No rows found or unsupported format.'; }
-        if (!$error) {
-            // Drop header row if it contains 'email'
-            if (isset($rows[0][0]) && (stripos((string)$rows[0][0], 'name') !== false || stripos((string)($rows[0][1] ?? ''), 'email') !== false)) {
-                array_shift($rows);
+        try {
+            $rows = readRowsFromUpload($_FILES['students_file']);
+            if (!$rows) { 
+                $error = 'No valid data found in the uploaded file.'; 
+            } else {
+                // Drop header row if it contains 'name' or 'email'
+                if (isset($rows[0][0]) && (stripos((string)$rows[0][0], 'name') !== false || stripos((string)($rows[0][1] ?? ''), 'email') !== false)) {
+                    array_shift($rows);
+                }
+                
+                if (empty($rows)) {
+                    $error = 'No valid data rows found after removing header. Please check your CSV format.';
+                } else {
+                    $insert = $pdo->prepare('INSERT INTO users (seat_number, name, email, password, role) VALUES (?,?,?,?,\'student\')');
+                    $skipped = [];
+                    $rowNum = 1; // Start from 1 since we may have removed header
+                    
+                    foreach ($rows as $r) {
+                        $rowNum++;
+                        $name = trim($r[0] ?? '');
+                        $email = trim($r[1] ?? '');
+                        
+                        // Validate data
+                        if ($name === '') {
+                            $skipped[] = "Row $rowNum: Name is empty";
+                            continue;
+                        }
+                        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                            $skipped[] = "Row $rowNum: Invalid email format '$email'";
+                            continue;
+                        }
+                        
+                        // Check existing
+                        $exists = $pdo->prepare('SELECT id FROM users WHERE email = ?');
+                        $exists->execute([$email]);
+                        if ($exists->fetch()) { 
+                            $skipped[] = "Row $rowNum: Email '$email' already exists";
+                            continue; 
+                        }
+                        
+                        try {
+                            $seat = generateSeatNumber($pdo);
+                            $plain = generatePassword(8);
+                            $hash = password_hash($plain, PASSWORD_BCRYPT);
+                            $insert->execute([$seat, $name, $email, $hash]);
+                            $created[] = ['seat_number'=>$seat,'name'=>$name,'email'=>$email,'password'=>$plain];
+                        } catch (Exception $e) {
+                            $skipped[] = "Row $rowNum: Database error - " . $e->getMessage();
+                        }
+                    }
+                    
+                    // Show summary
+                    if (!empty($skipped) && !empty($created)) {
+                        $error = count($skipped) . " rows were skipped:\n" . implode("\n", array_slice($skipped, 0, 5));
+                        if (count($skipped) > 5) {
+                            $error .= "\n... and " . (count($skipped) - 5) . " more.";
+                        }
+                    } elseif (!empty($skipped) && empty($created)) {
+                        $error = "No students were created. All rows had errors:\n" . implode("\n", array_slice($skipped, 0, 10));
+                        if (count($skipped) > 10) {
+                            $error .= "\n... and " . (count($skipped) - 10) . " more.";
+                        }
+                    }
+                }
             }
-            $insert = $pdo->prepare('INSERT INTO users (seat_number, name, email, password, role) VALUES (?,?,?,?,\'student\')');
-            foreach ($rows as $r) {
-                $name = trim($r[0] ?? '');
-                $email = trim($r[1] ?? '');
-                if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) { continue; }
-                // Check existing
-                $exists = $pdo->prepare('SELECT id FROM users WHERE email = ?');
-                $exists->execute([$email]);
-                if ($exists->fetch()) { continue; }
-                $seat = generateSeatNumber($pdo);
-                $plain = generatePassword(8);
-                $hash = password_hash($plain, PASSWORD_BCRYPT);
-                $insert->execute([$seat, $name, $email, $hash]);
-                $created[] = ['seat_number'=>$seat,'name'=>$name,'email'=>$email,'password'=>$plain];
-            }
+        } catch (Exception $e) {
+            $error = $e->getMessage();
         }
     }
 }
@@ -93,12 +157,15 @@ include 'partials/navbar.php';
         <div class="card-body">
             <form method="post" enctype="multipart/form-data" class="row g-3">
                 <div class="col-md-8">
-                    <input class="form-control" type="file" name="students_file" accept=".csv,.xlsx,.xls" required>
+                    <input class="form-control" type="file" name="students_file" accept=".csv" required>
                 </div>
                 <div class="col-md-4 d-grid">
-                    <button class="btn btn-primary">Upload</button>
+                    <button class="btn btn-primary">Upload Students</button>
                 </div>
-                <p class="small text-muted">Expected columns: Name, Email. The system generates Seat Number and Password automatically.</p>
+                <p class="small text-muted">
+                    <strong>CSV Format:</strong> Name, Email<br>
+                    <small>Excel files are no longer supported. Please save as CSV format. The system generates Seat Number and Password automatically.</small>
+                </p>
             </form>
         </div>
     </div>

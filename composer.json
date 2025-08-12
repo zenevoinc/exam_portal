@@ -1,7 +1,0 @@
-{
-  "name": "exam-portal",
-  "description": "Online MCQ Exam Portal",
-  "require": {
-    "phpoffice/phpspreadsheet": "^1.29"
-  }
-}

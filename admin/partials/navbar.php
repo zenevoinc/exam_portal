@@ -23,7 +23,7 @@
                         Imports/Exports
                     </a>
                     <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="upload_students.php">Import Students (CSV/XLSX)</a></li>
+                        <li><a class="dropdown-item" href="upload_students.php">Import Students (CSV)</a></li>
                         <li><a class="dropdown-item" href="export_students.php">Export Students</a></li>
                         <li><a class="dropdown-item" href="export_results.php">Export Results</a></li>
                     </ul>
