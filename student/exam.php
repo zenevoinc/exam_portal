@@ -45,6 +45,35 @@ $qStmt = $pdo->prepare('SELECT id, question_text, option_a, option_b, option_c, 
 $qStmt->execute([$exam_id, $setCode]);
 $questions = $qStmt->fetchAll();
 
+// Validate questions exist
+if (empty($questions)) {
+    define('PAGE_TITLE', 'No Questions Available');
+    include '../includes/header.php';
+    ?>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header text-center">
+                        <h4><i class="fas fa-exclamation-triangle"></i> No Questions Available</h4>
+                    </div>
+                    <div class="card-body text-center">
+                        <h5><?php echo htmlspecialchars($exam['title']); ?></h5>
+                        <div class="alert alert-warning">
+                            <p>No questions are available for Set <?php echo htmlspecialchars($setCode); ?> of this exam.</p>
+                            <p>Please contact your administrator or try again later.</p>
+                        </div>
+                        <a href="../student/index.php" class="btn btn-primary">
+                            <i class="fas fa-arrow-left"></i> Back to Dashboard
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php include '../includes/footer.php'; exit(); ?>
+<?php }
+
 // Existing answers for resuming
 $aStmt = $pdo->prepare('SELECT question_id, selected_option FROM answers WHERE student_exam_id = ?');
 $aStmt->execute([$se['id']]);
@@ -65,9 +94,10 @@ include '../includes/header.php';
         <h4 class="mb-0"><?php echo htmlspecialchars($exam['title']); ?> <small class="text-muted">(Set <?php echo $setCode; ?>)</small></h4>
         <small class="text-muted">Duration: <?php echo (int)$exam['duration_minutes']; ?> minutes</small>
       </div>
-      <div>
+      <div class="d-flex align-items-center gap-2">
         <span class="badge bg-dark p-2">Time Left: <span id="timeLeft"></span></span>
-        <button class="btn btn-sm btn-outline-secondary ms-2" id="fullscreenBtn">Fullscreen</button>
+        <span id="saveStatus" class="badge bg-secondary p-2 d-none">Saved</span>
+        <button class="btn btn-sm btn-outline-secondary" id="fullscreenBtn">Fullscreen</button>
       </div>
     </div>
 
@@ -110,11 +140,25 @@ let remainingSeconds = durationMinutes * 60;
 // Load from localStorage backup
 try {
   const stored = localStorage.getItem('exam_answers_'+studentExamId);
+  const progress = localStorage.getItem('exam_progress_'+studentExamId);
+  
   if (stored) {
     const parsed = JSON.parse(stored);
     existing = Object.assign(existing, parsed);
+    console.log('Restored', Object.keys(parsed).length, 'saved answers from local backup');
   }
-} catch(e) {}
+  
+  if (progress) {
+    const progressData = JSON.parse(progress);
+    // Restore to last position if it was recent (within last hour)
+    if (progressData.lastSaved && (Date.now() - progressData.lastSaved) < 3600000) {
+      currentIndex = progressData.currentIndex || 0;
+      console.log('Restored exam position to question', currentIndex + 1);
+    }
+  }
+} catch(e) {
+  console.error('Error restoring from localStorage:', e);
+}
 
 function renderQuestion(){
   const q = questions[currentIndex];
@@ -157,8 +201,20 @@ function saveCurrent(){
   const selected = document.querySelector('input[name="option"]:checked');
   if (selected){
     existing[q.id] = selected.value;
-    // Local backup
-    try { localStorage.setItem('exam_answers_'+studentExamId, JSON.stringify(existing)); } catch(e) {}
+    // Local backup - save immediately
+    try { 
+      localStorage.setItem('exam_answers_'+studentExamId, JSON.stringify(existing));
+      localStorage.setItem('exam_progress_'+studentExamId, JSON.stringify({
+        currentIndex: currentIndex,
+        lastSaved: Date.now(),
+        totalQuestions: questions.length
+      }));
+    } catch(e) {
+      console.error('LocalStorage error:', e);
+    }
+    
+    // Save to server
+    showSaveStatus('saving');
     saveAnswer(q.id, selected.value);
   }
 }
@@ -190,6 +246,77 @@ async function heartbeat(){
   hbTimer = setTimeout(heartbeat, 10000);
 }
 
+// Save status indicator function
+function showSaveStatus(status) {
+  const saveStatus = document.getElementById('saveStatus');
+  saveStatus.classList.remove('d-none', 'bg-secondary', 'bg-success', 'bg-warning', 'bg-danger');
+  
+  switch(status) {
+    case 'saving':
+      saveStatus.classList.add('bg-warning');
+      saveStatus.textContent = 'Saving...';
+      break;
+    case 'saved':
+      saveStatus.classList.add('bg-success');
+      saveStatus.textContent = 'Saved';
+      setTimeout(() => {
+        saveStatus.classList.add('d-none');
+      }, 2000);
+      break;
+    case 'error':
+      saveStatus.classList.add('bg-danger');
+      saveStatus.textContent = 'Save Failed';
+      setTimeout(() => {
+        saveStatus.classList.add('d-none');
+      }, 5000);
+      break;
+  }
+}
+
+// Auto-save functionality
+let autoSaveTimer;
+function startAutoSave() {
+  if (autoSaveTimer) clearInterval(autoSaveTimer);
+  autoSaveTimer = setInterval(() => {
+    const q = questions[currentIndex];
+    const selected = document.querySelector('input[name="option"]:checked');
+    if (selected && existing[q.id] !== selected.value) {
+      saveCurrent();
+    }
+  }, 30000); // Auto-save every 30 seconds
+}
+
+// Network status monitoring
+let isOnline = navigator.onLine;
+function updateNetworkStatus() {
+  const saveStatus = document.getElementById('saveStatus');
+  if (!isOnline) {
+    saveStatus.classList.remove('d-none', 'bg-secondary', 'bg-success', 'bg-warning');
+    saveStatus.classList.add('bg-danger');
+    saveStatus.textContent = 'Offline - Answers saved locally';
+  }
+}
+
+window.addEventListener('online', () => {
+  isOnline = true;
+  console.log('Connection restored - syncing answers...');
+  // Resave current answer when connection is restored
+  saveCurrent();
+});
+
+window.addEventListener('offline', () => {
+  isOnline = false;
+  updateNetworkStatus();
+});
+
+// Warn before leaving page
+window.addEventListener('beforeunload', (e) => {
+  e.preventDefault();
+  e.returnValue = 'Are you sure you want to leave? Your progress will be saved but you may lose time.';
+  return e.returnValue;
+});
+
 renderQuestion();
+startAutoSave();
 </script>
 <?php include '../includes/footer.php'; ?>

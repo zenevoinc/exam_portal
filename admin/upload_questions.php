@@ -15,10 +15,14 @@ if ($exam_id <= 0) {
 $message = '';
 $error = '';
 
-function importQuestionsFromArray(PDO $pdo, int $examId, string $setCode, array $rows): int {
+function importQuestionsFromArray(PDO $pdo, int $examId, string $setCode, array $rows): array {
     $insert = $pdo->prepare('INSERT INTO questions (exam_id, set_code, question_text, question_image, option_a, option_b, option_c, option_d, correct_option, marks) VALUES (?,?,?,?,?,?,?,?,?,?)');
     $count = 0;
+    $errors = [];
+    $rowNum = 1;
+    
     foreach ($rows as $row) {
+        $rowNum++;
         // Expected columns: Question, A, B, C, D, Answer, [Marks]
         $question = trim($row[0] ?? '');
         $a = trim($row[1] ?? '');
@@ -27,13 +31,30 @@ function importQuestionsFromArray(PDO $pdo, int $examId, string $setCode, array 
         $d = trim($row[4] ?? '');
         $answer = strtolower(trim($row[5] ?? ''));
         $marks = isset($row[6]) && is_numeric($row[6]) ? (float) $row[6] : 1.0;
-        if ($question === '' || !in_array($answer, ['a','b','c','d'], true)) {
+        
+        // Validate row data
+        if ($question === '') {
+            $errors[] = "Row $rowNum: Question text is empty";
             continue;
         }
-        $insert->execute([$examId, $setCode, $question, null, $a, $b, $c, $d, $answer, $marks]);
-        $count++;
+        if ($a === '' || $b === '' || $c === '' || $d === '') {
+            $errors[] = "Row $rowNum: One or more options are empty";
+            continue;
+        }
+        if (!in_array($answer, ['a','b','c','d'], true)) {
+            $errors[] = "Row $rowNum: Invalid answer '$answer' (must be a, b, c, or d)";
+            continue;
+        }
+        
+        try {
+            $insert->execute([$examId, $setCode, $question, null, $a, $b, $c, $d, $answer, $marks]);
+            $count++;
+        } catch (Exception $e) {
+            $errors[] = "Row $rowNum: Database error - " . $e->getMessage();
+        }
     }
-    return $count;
+    
+    return ['count' => $count, 'errors' => $errors];
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_code'])) {
@@ -41,50 +62,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_code'])) {
     if (!in_array($set_code, ['A','B','C'], true)) {
         $error = 'Invalid set code.';
     } elseif (!isset($_FILES['questions_file']) || $_FILES['questions_file']['error'] !== UPLOAD_ERR_OK) {
-        $error = 'Please upload a valid file.';
+        $uploadErrors = [
+            UPLOAD_ERR_INI_SIZE => 'File is too large (exceeds server limit)',
+            UPLOAD_ERR_FORM_SIZE => 'File is too large (exceeds form limit)',
+            UPLOAD_ERR_PARTIAL => 'File was only partially uploaded',
+            UPLOAD_ERR_NO_FILE => 'No file was uploaded',
+            UPLOAD_ERR_NO_TMP_DIR => 'Server error: No temporary directory',
+            UPLOAD_ERR_CANT_WRITE => 'Server error: Cannot write file',
+            UPLOAD_ERR_EXTENSION => 'Server error: File upload stopped by extension'
+        ];
+        $errorCode = $_FILES['questions_file']['error'] ?? UPLOAD_ERR_NO_FILE;
+        $error = $uploadErrors[$errorCode] ?? 'Unknown upload error occurred';
     } else {
         $tmp = $_FILES['questions_file']['tmp_name'];
         $ext = strtolower(pathinfo($_FILES['questions_file']['name'], PATHINFO_EXTENSION));
         $rows = [];
-        if ($ext === 'csv') {
+        
+        if ($ext !== 'csv') {
+            $error = 'Only CSV files are supported. Please convert your Excel file to CSV format.';
+        } else {
+            // Read CSV file
             if (($handle = fopen($tmp, 'r')) !== false) {
-                // skip header if present when detected
+                $rowCount = 0;
                 while (($data = fgetcsv($handle)) !== false) {
-                    $rows[] = $data;
+                    $rowCount++;
+                    // Skip empty rows
+                    if (count(array_filter($data, function($v) { return trim($v) !== ''; })) > 0) {
+                        $rows[] = $data;
+                    }
                 }
                 fclose($handle);
-            }
-        } elseif (in_array($ext, ['xlsx','xls'], true)) {
-            // Try PhpSpreadsheet if available
-            $autoload = __DIR__ . '/../vendor/autoload.php';
-            if (file_exists($autoload)) {
-                require_once $autoload;
-                try {
-                    $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($tmp);
-                    $spreadsheet = $reader->load($tmp);
-                    $sheet = $spreadsheet->getActiveSheet();
-                    foreach ($sheet->toArray() as $row) {
-                        $rows[] = $row;
-                    }
-                } catch (Throwable $t) {
-                    $error = 'Failed to parse spreadsheet: ' . $t->getMessage();
+                
+                if ($rowCount === 0) {
+                    $error = 'The CSV file appears to be empty.';
                 }
             } else {
-                $error = 'XLSX parsing requires PhpSpreadsheet. Upload CSV or install dependency.';
+                $error = 'Failed to read the uploaded CSV file. Please check the file format.';
             }
-        } else {
-            $error = 'Unsupported file type.';
         }
 
         if (!$error && $rows) {
-            // heuristic: check if first row looks like header containing 'Question'
+            // Check if first row looks like header containing 'Question'
             if (isset($rows[0][0]) && stripos((string)$rows[0][0], 'question') !== false) {
                 array_shift($rows);
             }
-            $inserted = importQuestionsFromArray($pdo, $exam_id, $set_code, $rows);
-            $message = "$inserted questions imported for Set $set_code.";
+            
+            if (empty($rows)) {
+                $error = 'No valid data rows found in the CSV file. Please check your file format.';
+            } else {
+                $result = importQuestionsFromArray($pdo, $exam_id, $set_code, $rows);
+                $inserted = $result['count'];
+                $errors = $result['errors'];
+                
+                if ($inserted > 0) {
+                    $message = "$inserted questions imported successfully for Set $set_code.";
+                    if (!empty($errors)) {
+                        $message .= " However, " . count($errors) . " rows had errors and were skipped.";
+                    }
+                }
+                
+                if (!empty($errors)) {
+                    if ($inserted === 0) {
+                        $error = "No questions were imported. Errors found:\n" . implode("\n", array_slice($errors, 0, 10));
+                        if (count($errors) > 10) {
+                            $error .= "\n... and " . (count($errors) - 10) . " more errors.";
+                        }
+                    } else {
+                        // Show errors as warning
+                        $error = "Some rows had errors:\n" . implode("\n", array_slice($errors, 0, 5));
+                        if (count($errors) > 5) {
+                            $error .= "\n... and " . (count($errors) - 5) . " more errors.";
+                        }
+                    }
+                }
+            }
         } elseif (!$error) {
-            $error = 'No rows detected in file.';
+            $error = 'No valid data found in the uploaded file.';
         }
     }
 }
@@ -121,9 +174,12 @@ include 'partials/navbar.php';
                     <form method="post" enctype="multipart/form-data">
                         <input type="hidden" name="set_code" value="<?php echo $code; ?>">
                         <div class="mb-2">
-                            <input class="form-control" type="file" name="questions_file" accept=".csv,.xlsx,.xls" required>
+                            <input class="form-control" type="file" name="questions_file" accept=".csv" required>
                         </div>
-                        <p class="small text-muted mb-2">Columns: Question, A, B, C, D, Answer (a/b/c/d), [Marks]</p>
+                        <p class="small text-muted mb-2">
+                            <strong>CSV Format:</strong> Question, A, B, C, D, Answer (a/b/c/d), [Marks]<br>
+                            <small>Excel files are no longer supported. Please save as CSV format.</small>
+                        </p>
                         <div class="d-grid">
                             <button type="submit" class="btn btn-primary">Upload Set <?php echo $code; ?></button>
                         </div>

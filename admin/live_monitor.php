@@ -31,38 +31,174 @@ include '../includes/header.php';
 include 'partials/navbar.php';
 ?>
 <div class="container mt-4">
-    <h3 class="mb-3">Live Monitor: <?php echo htmlspecialchars($exam['title']); ?></h3>
-    <div class="table-responsive">
-        <table class="table table-striped" id="monitorTable">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Status</th>
-                    <th>Answered</th>
-                    <th>Last Seen</th>
-                    <th>Started</th>
-                    <th>Ended</th>
-                    <th>Score</th>
-                </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="mb-0">Live Monitor: <?php echo htmlspecialchars($exam['title']); ?></h3>
+        <div>
+            <a href="live_monitor.php" class="btn btn-outline-secondary btn-sm">← Back to Exam List</a>
+            <button class="btn btn-outline-primary btn-sm" onclick="toggleAutoRefresh()" id="refreshBtn">
+                <span id="refreshStatus">Auto-refresh: ON</span>
+            </button>
+        </div>
+    </div>
+    
+    <!-- Exam Status Card -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-1">Exam Status</h6>
+                    <span class="badge bg-<?php 
+                        $now = time();
+                        $start = strtotime($exam['start_time']);
+                        $end = strtotime($exam['end_time']);
+                        if ($now < $start) {
+                            echo 'warning">Upcoming';
+                        } elseif ($now > $end) {
+                            echo 'secondary">Ended';
+                        } else {
+                            echo 'success">Active';
+                        }
+                    ?></span>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-1">Duration</h6>
+                    <span><?php echo (int)$exam['duration_minutes']; ?> minutes</span>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-1">Start Time</h6>
+                    <span><?php echo date('d M Y h:i A', strtotime($exam['start_time'])); ?></span>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-1">End Time</h6>
+                    <span><?php echo date('d M Y h:i A', strtotime($exam['end_time'])); ?></span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Students Monitor -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Student Activity</h5>
+            <small class="text-muted">Last updated: <span id="lastUpdate">Loading...</span></small>
+        </div>
+        <div class="card-body">
+            <div id="noStudentsMessage" class="alert alert-info d-none">
+                <h6><i class="fas fa-info-circle"></i> No Students Currently</h6>
+                <p class="mb-0">No students have started this exam yet. Students will appear here once they begin.</p>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-striped table-hover" id="monitorTable">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th>Last Seen</th>
+                            <th>Started</th>
+                            <th>Ended</th>
+                            <th>Score</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </div>
 <script>
+let autoRefresh = true;
+let refreshInterval;
+
 async function loadMonitor(){
-  const res = await fetch('live_monitor.php?exam_id=<?php echo $exam_id; ?>&as=json',{cache:'no-store'});
-  const data = await res.json();
-  const tbody = document.querySelector('#monitorTable tbody');
-  tbody.innerHTML = '';
-  data.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.name}</td><td>${r.email}</td><td><span class="badge bg-${r.status==='completed'?'success':(r.status==='in_progress'?'info':'secondary')}">${r.status.replace('_',' ')}</span></td><td>${r.answered_count}</td><td>${r.last_seen_at??''}</td><td>${r.start_time??''}</td><td>${r.end_time??''}</td><td>${r.score??''}</td>`;
-    tbody.appendChild(tr);
-  });
+  try {
+    const res = await fetch('live_monitor.php?exam_id=<?php echo $exam_id; ?>&as=json',{cache:'no-store'});
+    const data = await res.json();
+    const tbody = document.querySelector('#monitorTable tbody');
+    const noStudentsMsg = document.getElementById('noStudentsMessage');
+    
+    tbody.innerHTML = '';
+    
+    if (data.length === 0) {
+      noStudentsMsg.classList.remove('d-none');
+      document.querySelector('#monitorTable').style.display = 'none';
+    } else {
+      noStudentsMsg.classList.add('d-none');
+      document.querySelector('#monitorTable').style.display = 'table';
+      
+      data.forEach(r => {
+        const tr = document.createElement('tr');
+        const statusBadge = r.status === 'completed' ? 'success' : 
+                           r.status === 'in_progress' ? 'info' : 'secondary';
+        const statusText = r.status.replace('_', ' ');
+        const progress = r.answered_count ? `${r.answered_count} questions` : 'Not started';
+        const lastSeen = r.last_seen_at ? new Date(r.last_seen_at).toLocaleString() : '-';
+        const startTime = r.start_time ? new Date(r.start_time).toLocaleString() : '-';
+        const endTime = r.end_time ? new Date(r.end_time).toLocaleString() : '-';
+        const score = r.score !== null ? r.score : '-';
+        
+        tr.innerHTML = `
+          <td>${r.name}</td>
+          <td>${r.email}</td>
+          <td><span class="badge bg-${statusBadge}">${statusText}</span></td>
+          <td>${progress}</td>
+          <td><small>${lastSeen}</small></td>
+          <td><small>${startTime}</small></td>
+          <td><small>${endTime}</small></td>
+          <td>${score}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+    
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+  } catch (error) {
+    console.error('Failed to load monitor data:', error);
+    document.getElementById('lastUpdate').textContent = 'Error loading data';
+  }
 }
+
+function toggleAutoRefresh() {
+  autoRefresh = !autoRefresh;
+  const statusSpan = document.getElementById('refreshStatus');
+  const btn = document.getElementById('refreshBtn');
+  
+  if (autoRefresh) {
+    statusSpan.textContent = 'Auto-refresh: ON';
+    btn.classList.remove('btn-outline-secondary');
+    btn.classList.add('btn-outline-primary');
+    startAutoRefresh();
+  } else {
+    statusSpan.textContent = 'Auto-refresh: OFF';
+    btn.classList.remove('btn-outline-primary');
+    btn.classList.add('btn-outline-secondary');
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+    }
+  }
+}
+
+function startAutoRefresh() {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+  }
+  refreshInterval = setInterval(() => {
+    if (autoRefresh) {
+      loadMonitor();
+    }
+  }, 5000);
+}
+
+// Initial load
 loadMonitor();
-setInterval(loadMonitor, 5000);
+startAutoRefresh();
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+  }
+});
 </script>
 <?php include '../includes/footer.php'; ?>
