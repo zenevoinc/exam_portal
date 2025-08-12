@@ -1,5 +1,19 @@
-# Disable directory Browse
-Options -Indexes
+# Basic security headers and caching rules
+<IfModule mod_headers.c>
+Header always set X-Frame-Options "SAMEORIGIN"
+Header always set X-Content-Type-Options "nosniff"
+Header always set Referrer-Policy "no-referrer-when-downgrade"
+Header always set X-XSS-Protection "1; mode=block"
+</IfModule>
 
-# Rewrite engine can be turned on here for future use
-# RewriteEngine On
+# Disable caching for API and student area
+<FilesMatch "^(api/|student/|admin/).*$">
+  <IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresDefault "access plus 0 seconds"
+  </IfModule>
+  <IfModule mod_headers.c>
+    Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+    Header set Pragma "no-cache"
+  </IfModule>
+</FilesMatch>

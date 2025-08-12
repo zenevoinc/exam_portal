@@ -21,15 +21,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($email) || empty($password)) {
         $error_message = 'Please enter both email and password.';
     } else {
-        $stmt = $pdo->prepare("SELECT id, name, email, password, role FROM users WHERE email = ? AND status = 'active'");
+        $stmt = $pdo->prepare("SELECT id, name, email, password, role, failed_attempts FROM users WHERE email = ? AND status = 'active'");
         $stmt->execute([$email]);
         $user = $stmt->fetch();
 
         if ($user && password_verify($password, $user['password'])) {
+            // Reset failed attempts
+            $pdo->prepare('UPDATE users SET failed_attempts = 0 WHERE id = ?')->execute([$user['id']]);
             // Password is correct, start a new session
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['user_name'] = $user['name'];
             $_SESSION['user_role'] = $user['role'];
+            $_SESSION['last_activity'] = time();
 
             // Redirect based on role
             if ($user['role'] === 'admin') {
@@ -40,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit();
         } else {
             // Invalid credentials
+            if ($user) { $pdo->prepare('UPDATE users SET failed_attempts = failed_attempts + 1 WHERE id = ?')->execute([$user['id']]); }
             $error_message = 'Invalid email or password.';
         }
     }
@@ -58,7 +62,7 @@ include 'includes/header.php';
                     <?php echo htmlspecialchars($error_message); ?>
                 </div>
             <?php endif; ?>
-            <form action="index.php" method="POST">
+            <form action="index.php" method="POST" autocomplete="off">
                 <div class="mb-3">
                     <label for="email" class="form-label">Email address</label>
                     <input type="email" class="form-control" id="email" name="email" required>

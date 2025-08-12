@@ -39,16 +39,16 @@ include 'partials/navbar.php'; // Include the new navbar
                 <div class="card-header">Total Exams</div>
                 <div class="card-body">
                     <h5 class="card-title display-4"><?php echo $total_exams; ?></h5>
-                     <a href="#" class="text-white">View Details &rarr;</a>
+                     <a href="manage_exams.php" class="text-white">Manage Exams &rarr;</a>
                 </div>
             </div>
         </div>
         <div class="col-md-4">
             <div class="card text-dark bg-warning mb-3">
-                <div class="card-header">Reports</div>
+                <div class="card-header">Imports/Reports</div>
                 <div class="card-body">
-                    <h5 class="card-title display-4"><small>N/A</small></h5>
-                     <a href="#" class="text-dark">View Reports &rarr;</a>
+                    <h5 class="card-title display-6"><small>Tools</small></h5>
+                     <a href="upload_students.php" class="text-dark">Import Students &rarr;</a>
                 </div>
             </div>
         </div>

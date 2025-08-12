@@ -13,7 +13,20 @@
                     <a class="nav-link <?php echo (basename($_SERVER['PHP_SELF']) == 'manage_students.php') ? 'active' : ''; ?>" href="manage_students.php">Manage Students</a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="#">Manage Exams</a>
+                    <a class="nav-link <?php echo (basename($_SERVER['PHP_SELF']) == 'manage_exams.php') ? 'active' : ''; ?>" href="manage_exams.php">Manage Exams</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?php echo (basename($_SERVER['PHP_SELF']) == 'live_monitor.php') ? 'active' : ''; ?>" href="live_monitor.php">Live Monitor</a>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?php echo in_array(basename($_SERVER['PHP_SELF']), ['upload_students.php']) ? 'active' : ''; ?>" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Imports/Exports
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="upload_students.php">Import Students (CSV/XLSX)</a></li>
+                        <li><a class="dropdown-item" href="export_students.php">Export Students</a></li>
+                        <li><a class="dropdown-item" href="export_results.php">Export Results</a></li>
+                    </ul>
                 </li>
             </ul>
             <div class="d-flex">

@@ -1,0 +1,136 @@
+<?php
+require_once '../config.php';
+require_once '../includes/db.php';
+
+if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'admin') {
+    header('Location: ../index.php');
+    exit();
+}
+
+$message = '';
+$error = '';
+
+// Create exam
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_exam'])) {
+    $title = trim($_POST['title']);
+    $description = trim($_POST['description']);
+    $start_time = trim($_POST['start_time']);
+    $end_time = trim($_POST['end_time']);
+    $duration_minutes = (int) $_POST['duration_minutes'];
+
+    if ($title === '' || $start_time === '' || $end_time === '' || $duration_minutes <= 0) {
+        $error = 'Please fill all required fields with valid values.';
+    } else {
+        $stmt = $pdo->prepare('INSERT INTO exams (title, description, start_time, end_time, duration_minutes, created_by) VALUES (?,?,?,?,?,?)');
+        if ($stmt->execute([$title, $description, $start_time, $end_time, $duration_minutes, $_SESSION['user_id']])) {
+            $message = 'Exam created successfully.';
+        } else {
+            $error = 'Failed to create exam.';
+        }
+    }
+}
+
+// Toggle result view
+if (isset($_GET['toggle_result']) && isset($_GET['id'])) {
+    $exam_id = (int) $_GET['id'];
+    $pdo->prepare('UPDATE exams SET allow_result_view = 1 - allow_result_view WHERE id = ?')->execute([$exam_id]);
+    header('Location: manage_exams.php');
+    exit();
+}
+
+$exams = $pdo->query('SELECT * FROM exams ORDER BY created_at DESC')->fetchAll();
+
+define('PAGE_TITLE', 'Manage Exams');
+include '../includes/header.php';
+include 'partials/navbar.php';
+?>
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header"><h4>Create Exam</h4></div>
+                <div class="card-body">
+                    <?php if ($message && !$error): ?>
+                        <div class="alert alert-success"><?php echo $message; ?></div>
+                    <?php endif; ?>
+                    <?php if ($error): ?>
+                        <div class="alert alert-danger"><?php echo $error; ?></div>
+                    <?php endif; ?>
+                    <form method="post">
+                        <div class="mb-3">
+                            <label class="form-label">Title</label>
+                            <input type="text" class="form-control" name="title" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Description</label>
+                            <textarea class="form-control" name="description" rows="3"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Start Time</label>
+                            <input type="datetime-local" class="form-control" name="start_time" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">End Time</label>
+                            <input type="datetime-local" class="form-control" name="end_time" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Duration (minutes)</label>
+                            <input type="number" class="form-control" name="duration_minutes" min="1" required>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" name="create_exam" class="btn btn-primary">Create Exam</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">Exams</h4>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Schedule</th>
+                                    <th>Duration</th>
+                                    <th>Results</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if (!$exams): ?>
+                                    <tr><td colspan="5" class="text-center">No exams created yet.</td></tr>
+                                <?php else: foreach ($exams as $exam): ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($exam['title']); ?></td>
+                                        <td>
+                                            <?php echo date('d M Y h:i A', strtotime($exam['start_time'])); ?>
+                                            &ndash;
+                                            <?php echo date('d M Y h:i A', strtotime($exam['end_time'])); ?>
+                                        </td>
+                                        <td><?php echo (int)$exam['duration_minutes']; ?> min</td>
+                                        <td>
+                                            <span class="badge bg-<?php echo $exam['allow_result_view'] ? 'success' : 'secondary'; ?>">
+                                                <?php echo $exam['allow_result_view'] ? 'Visible' : 'Hidden'; ?>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <a class="btn btn-sm btn-outline-primary" href="upload_questions.php?exam_id=<?php echo $exam['id']; ?>">Upload Questions</a>
+                                            <a class="btn btn-sm btn-outline-warning" href="?toggle_result=1&id=<?php echo $exam['id']; ?>">Toggle Results</a>
+                                            <a class="btn btn-sm btn-outline-success" href="live_monitor.php?exam_id=<?php echo $exam['id']; ?>">Monitor</a>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php include '../includes/footer.php'; ?>

@@ -30,8 +30,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_student'])) {
         } else {
             // Hash password and insert user
             $hashed_password = password_hash($password, PASSWORD_BCRYPT);
-            $stmt = $pdo->prepare("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'student')");
-            if ($stmt->execute([$name, $email, $hashed_password])) {
+            // Generate seat number if not provided
+            $seat = 'SN-' . date('Y') . '-' . str_pad((string)random_int(0, 99999), 5, '0', STR_PAD_LEFT);
+            $stmt = $pdo->prepare("INSERT INTO users (seat_number, name, email, password, role) VALUES (?, ?, ?, ?, 'student')");
+            if ($stmt->execute([$seat, $name, $email, $hashed_password])) {
                 $message = "Student account created successfully!";
             } else {
                 $error = "Failed to create student account.";
@@ -57,7 +59,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])
 }
 
 // Fetch all students to display
-$stmt = $pdo->query("SELECT id, name, email, status, created_at FROM users WHERE role = 'student' ORDER BY created_at DESC");
+$stmt = $pdo->query("SELECT id, seat_number, name, email, status, created_at FROM users WHERE role = 'student' ORDER BY created_at DESC");
 $students = $stmt->fetchAll();
 
 // Get feedback messages from URL
@@ -73,8 +75,9 @@ include 'partials/navbar.php';
     <div class="row">
         <div class="col-md-4">
             <div class="card">
-                <div class="card-header">
-                    <h4>Add New Student</h4>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">Add New Student</h4>
+                    <a class="btn btn-sm btn-outline-secondary" href="upload_students.php">Bulk Import</a>
                 </div>
                 <div class="card-body">
                     <?php if ($message && !isset($_GET['error'])): ?>
@@ -101,6 +104,9 @@ include 'partials/navbar.php';
                             <button type="submit" name="add_student" class="btn btn-primary">Add Student</button>
                         </div>
                     </form>
+                    <div class="mt-3">
+                        <a href="export_students.php" class="btn btn-sm btn-outline-secondary">Export Students</a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -111,41 +117,45 @@ include 'partials/navbar.php';
                     <h4>Existing Students</h4>
                 </div>
                 <div class="card-body">
-                    <table class="table table-striped table-hover">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Email</th>
-                                <th>Status</th>
-                                <th>Registered On</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if (empty($students)): ?>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead>
                                 <tr>
-                                    <td colspan="5" class="text-center">No students found.</td>
+                                    <th>Seat No.</th>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Status</th>
+                                    <th>Registered On</th>
+                                    <th>Actions</th>
                                 </tr>
-                            <?php else: ?>
-                                <?php foreach ($students as $student): ?>
-                                <tr>
-                                    <td><?php echo htmlspecialchars($student['name']); ?></td>
-                                    <td><?php echo htmlspecialchars($student['email']); ?></td>
-                                    <td>
-                                        <span class="badge bg-<?php echo $student['status'] === 'active' ? 'success' : 'secondary'; ?>">
-                                            <?php echo ucfirst($student['status']); ?>
-                                        </span>
-                                    </td>
-                                    <td><?php echo date('d M Y, h:i A', strtotime($student['created_at'])); ?></td>
-                                    <td>
-                                        <a href="#" class="btn btn-sm btn-warning">Edit</a>
-                                        <a href="manage_students.php?action=delete&id=<?php echo $student['id']; ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this student?');">Delete</a>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                <?php if (empty($students)): ?>
+                                    <tr>
+                                        <td colspan="6" class="text-center">No students found.</td>
+                                    </tr>
+                                <?php else: ?>
+                                    <?php foreach ($students as $student): ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($student['seat_number']); ?></td>
+                                        <td><?php echo htmlspecialchars($student['name']); ?></td>
+                                        <td><?php echo htmlspecialchars($student['email']); ?></td>
+                                        <td>
+                                            <span class="badge bg-<?php echo $student['status'] === 'active' ? 'success' : 'secondary'; ?>">
+                                                <?php echo ucfirst($student['status']); ?>
+                                            </span>
+                                        </td>
+                                        <td><?php echo date('d M Y, h:i A', strtotime($student['created_at'])); ?></td>
+                                        <td>
+                                            <a href="#" class="btn btn-sm btn-warning">Edit</a>
+                                            <a href="manage_students.php?action=delete&id=<?php echo $student['id']; ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this student?');">Delete</a>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>

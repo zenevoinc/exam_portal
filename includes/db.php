@@ -17,4 +17,16 @@ try {
     // If connection fails, stop the script and show an error
     die("Database connection failed: " . $e->getMessage());
 }
+
+// Idle session timeout (30 minutes)
+if (isset($_SESSION['user_id'])) {
+    $idleLimit = 30 * 60;
+    if (isset($_SESSION['last_activity']) && time() - $_SESSION['last_activity'] > $idleLimit) {
+        $_SESSION = [];
+        session_destroy();
+        header('Location: ../index.php');
+        exit();
+    }
+    $_SESSION['last_activity'] = time();
+}
 ?>
