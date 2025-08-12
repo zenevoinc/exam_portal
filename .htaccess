@@ -1,0 +1,5 @@
+# Disable directory Browse
+Options -Indexes
+
+# Rewrite engine can be turned on here for future use
+# RewriteEngine On
