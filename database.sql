@@ -1,9 +1,4 @@
--- Create a new database named 'exam_portal_db'
--- You can run this command first in your SQL client or create it manually via phpMyAdmin
-CREATE DATABASE IF NOT EXISTS exam_portal_db;
 
--- Use the newly created database
-USE exam_portal_db;
 
 -- Table structure for table `users`
 CREATE TABLE `users` (
