@@ -9,7 +9,55 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'admin') {
 
 $exam_id = isset($_GET['exam_id']) ? (int) $_GET['exam_id'] : 0;
 if ($exam_id <= 0) {
-    die('Invalid exam.');
+    define('PAGE_TITLE', 'Live Monitor');
+    include '../includes/header.php';
+    include 'partials/navbar.php';
+    ?>
+    <div class="container mt-4">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0">Live Monitor</h4>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-danger">
+                    <h5><i class="fas fa-exclamation-triangle"></i> Invalid Exam</h5>
+                    <p>No exam ID provided or invalid exam ID. Please select an exam to monitor.</p>
+                </div>
+                <div class="mt-3">
+                    <h6>Available Exams:</h6>
+                    <?php
+                    $exams = $pdo->query('SELECT id, title, start_time, end_time FROM exams ORDER BY created_at DESC')->fetchAll();
+                    if ($exams): ?>
+                        <div class="list-group">
+                            <?php foreach ($exams as $exam): 
+                                $now = time();
+                                $start = strtotime($exam['start_time']);
+                                $end = strtotime($exam['end_time']);
+                                $status = $now < $start ? 'warning' : ($now > $end ? 'secondary' : 'success');
+                                $statusText = $now < $start ? 'Upcoming' : ($now > $end ? 'Ended' : 'Active');
+                            ?>
+                                <a href="live_monitor.php?exam_id=<?php echo $exam['id']; ?>" 
+                                   class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6 class="mb-1"><?php echo htmlspecialchars($exam['title']); ?></h6>
+                                        <small><?php echo date('d M Y h:i A', strtotime($exam['start_time'])); ?> - <?php echo date('d M Y h:i A', strtotime($exam['end_time'])); ?></small>
+                                    </div>
+                                    <span class="badge bg-<?php echo $status; ?>"><?php echo $statusText; ?></span>
+                                </a>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php else: ?>
+                        <div class="alert alert-info">
+                            <p class="mb-0">No exams found. <a href="manage_exams.php">Create an exam</a> to start monitoring.</p>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php
+    include '../includes/footer.php';
+    exit();
 }
 
 // Lightweight JSON endpoint
@@ -190,9 +238,28 @@ function startAutoRefresh() {
   }, 5000);
 }
 
+// Auto-submit expired exams periodically
+async function autoSubmitExpired() {
+  try {
+    const response = await fetch('../api/auto_submit_expired.php');
+    const result = await response.json();
+    if (result.success && result.submitted_count > 0) {
+      console.log(`Auto-submitted ${result.submitted_count} expired exams`);
+      // Reload monitor data to reflect changes
+      loadMonitor();
+    }
+  } catch (error) {
+    console.error('Auto-submit failed:', error);
+  }
+}
+
+// Run auto-submit check every minute
+setInterval(autoSubmitExpired, 60000);
+
 // Initial load
 loadMonitor();
 startAutoRefresh();
+autoSubmitExpired(); // Check for expired exams on page load
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {

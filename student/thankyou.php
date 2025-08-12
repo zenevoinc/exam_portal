@@ -17,6 +17,12 @@ include '../includes/header.php';
 ?>
 <div class="container mt-5">
   <div class="text-center">
+    <?php if (isset($_GET['auto_submitted']) && $_GET['auto_submitted'] == '1'): ?>
+      <div class="alert alert-warning mb-4">
+        <h5><i class="fas fa-clock"></i> Exam Auto-Submitted</h5>
+        <p class="mb-0">Your exam was automatically submitted because the time limit was reached.</p>
+      </div>
+    <?php endif; ?>
     <h3>Thank you! Your exam has been submitted.</h3>
     <?php if ($exam && $exam['allow_result_view']): ?>
       <p class="mt-3">Your score:</p>

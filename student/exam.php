@@ -29,8 +29,34 @@ $exam = $exam->fetch();
 if (!$exam) { die('Exam not found'); }
 // Enforce schedule window
 $now = time();
-if ($now < strtotime($exam['start_time']) || $now > strtotime($exam['end_time'])) {
-    die('Exam is not available at this time.');
+if ($now < strtotime($exam['start_time'])) {
+    die('Exam has not started yet.');
+}
+
+// If exam has ended, auto-submit if still in progress
+if ($now > strtotime($exam['end_time'])) {
+    if ($se['status'] === 'in_progress') {
+        // Auto-submit this exam since time has expired
+        $answers = $pdo->prepare('SELECT a.question_id, a.selected_option FROM answers a WHERE a.student_exam_id = ?');
+        $answers->execute([$se['id']]);
+        $ans = $answers->fetchAll();
+        $map = [];
+        foreach ($ans as $r) { $map[(int)$r['question_id']] = $r['selected_option']; }
+        $q = $pdo->prepare('SELECT id, correct_option, marks FROM questions WHERE exam_id = ?');
+        $q->execute([$se['exam_id']]);
+        $score = 0.0;
+        foreach ($q as $qr) {
+            $qid = (int)$qr['id'];
+            if (isset($map[$qid]) && $map[$qid] === $qr['correct_option']) {
+                $score += (float)$qr['marks'];
+            }
+        }
+        $pdo->prepare('UPDATE student_exam SET status = "completed", end_time = NOW(), score = ? WHERE id = ?')->execute([$score, $se['id']]);
+        header('Location: thankyou.php?exam_id=' . $exam_id . '&auto_submitted=1');
+        exit();
+    } else {
+        die('Exam has ended.');
+    }
 }
 
 // Load questions for a randomly assigned set stored in session per exam

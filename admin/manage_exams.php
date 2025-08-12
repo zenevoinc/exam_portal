@@ -38,6 +38,43 @@ if (isset($_GET['toggle_result']) && isset($_GET['id'])) {
     exit();
 }
 
+// Delete exam and all related data
+if (isset($_GET['delete_exam']) && isset($_GET['id'])) {
+    $exam_id = (int) $_GET['id'];
+    
+    try {
+        $pdo->beginTransaction();
+        
+        // Delete in correct order to maintain referential integrity
+        
+        // First, get all student_exam IDs to delete related answers
+        $stmt = $pdo->prepare('SELECT id FROM student_exam WHERE exam_id = ?');
+        $stmt->execute([$exam_id]);
+        $studentExamIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        // Delete answers for this exam
+        if (!empty($studentExamIds)) {
+            $placeholders = str_repeat('?,', count($studentExamIds) - 1) . '?';
+            $pdo->prepare("DELETE FROM answers WHERE student_exam_id IN ($placeholders)")->execute($studentExamIds);
+        }
+        
+        // Delete student exam records
+        $pdo->prepare('DELETE FROM student_exam WHERE exam_id = ?')->execute([$exam_id]);
+        
+        // Delete questions for this exam
+        $pdo->prepare('DELETE FROM questions WHERE exam_id = ?')->execute([$exam_id]);
+        
+        // Finally, delete the exam itself
+        $pdo->prepare('DELETE FROM exams WHERE id = ?')->execute([$exam_id]);
+        
+        $pdo->commit();
+        $message = 'Exam and all related data deleted successfully.';
+    } catch (Exception $e) {
+        $pdo->rollback();
+        $error = 'Failed to delete exam: ' . $e->getMessage();
+    }
+}
+
 $exams = $pdo->query('SELECT * FROM exams ORDER BY created_at DESC')->fetchAll();
 
 define('PAGE_TITLE', 'Manage Exams');
@@ -122,6 +159,8 @@ include 'partials/navbar.php';
                                             <a class="btn btn-sm btn-outline-primary" href="upload_questions.php?exam_id=<?php echo $exam['id']; ?>">Upload Questions</a>
                                             <a class="btn btn-sm btn-outline-warning" href="?toggle_result=1&id=<?php echo $exam['id']; ?>">Toggle Results</a>
                                             <a class="btn btn-sm btn-outline-success" href="live_monitor.php?exam_id=<?php echo $exam['id']; ?>">Monitor</a>
+                                            <a class="btn btn-sm btn-outline-info" href="export_results.php?exam_id=<?php echo $exam['id']; ?>">Export</a>
+                                            <button class="btn btn-sm btn-outline-danger" onclick="confirmDelete(<?php echo $exam['id']; ?>, '<?php echo htmlspecialchars($exam['title'], ENT_QUOTES); ?>')">Delete</button>
                                         </td>
                                     </tr>
                                 <?php endforeach; endif; ?>
@@ -133,4 +172,13 @@ include 'partials/navbar.php';
         </div>
     </div>
 </div>
+
+<script>
+function confirmDelete(examId, examTitle) {
+    if (confirm(`Are you sure you want to delete the exam "${examTitle}"?\n\nThis will permanently delete:\n- The exam\n- All questions\n- All student results\n- All student answers\n\nThis action cannot be undone!`)) {
+        window.location.href = `?delete_exam=1&id=${examId}`;
+    }
+}
+</script>
+
 <?php include '../includes/footer.php'; ?>

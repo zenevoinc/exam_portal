@@ -22,6 +22,53 @@ if (!isset($_GET['exam_id'])) {
 }
 
 $exam_id = (int) $_GET['exam_id'];
+
+// Auto-submit any expired exams before exporting
+if ($exam_id > 0) {
+    // Check if this exam has ended
+    $examCheck = $pdo->prepare('SELECT end_time FROM exams WHERE id = ?');
+    $examCheck->execute([$exam_id]);
+    $exam = $examCheck->fetch();
+    
+    if ($exam && strtotime($exam['end_time']) < time()) {
+        // Exam has ended, auto-submit any remaining in-progress exams
+        $expiredStmt = $pdo->prepare('
+            SELECT se.id as student_exam_id, se.exam_id 
+            FROM student_exam se 
+            WHERE se.exam_id = ? AND se.status = "in_progress"
+        ');
+        $expiredStmt->execute([$exam_id]);
+        $expiredStudentExams = $expiredStmt->fetchAll();
+        
+        foreach ($expiredStudentExams as $se) {
+            $student_exam_id = $se['student_exam_id'];
+            
+            // Auto-grade this student's exam
+            $answers = $pdo->prepare('SELECT a.question_id, a.selected_option FROM answers a WHERE a.student_exam_id = ?');
+            $answers->execute([$student_exam_id]);
+            $ans = $answers->fetchAll();
+            $map = [];
+            foreach ($ans as $r) { 
+                $map[(int)$r['question_id']] = $r['selected_option']; 
+            }
+            
+            $q = $pdo->prepare('SELECT id, correct_option, marks FROM questions WHERE exam_id = ?');
+            $q->execute([$exam_id]);
+            $score = 0.0;
+            foreach ($q as $qr) {
+                $qid = (int)$qr['id'];
+                if (isset($map[$qid]) && $map[$qid] === $qr['correct_option']) {
+                    $score += (float)$qr['marks'];
+                }
+            }
+            
+            // Update student_exam to completed
+            $updateStmt = $pdo->prepare('UPDATE student_exam SET status = "completed", end_time = NOW(), score = ? WHERE id = ?');
+            $updateStmt->execute([$score, $student_exam_id]);
+        }
+    }
+}
+
 header('Content-Type: text/csv');
 header('Content-Disposition: attachment; filename="results.csv"');
 $out = fopen('php://output', 'w');
