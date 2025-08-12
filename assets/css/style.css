@@ -6,3 +6,9 @@ body {
 .vh-100 {
     height: 100vh;
 }
+
+.btn.border-success {
+    border-width: 2px !important;
+}
+
+.badge { text-transform: capitalize; }
